@@ -1,0 +1,27 @@
+services:
+  external_api_service:
+    build:
+      context: .
+      dockerfile: ./docker_env/go/Dockerfile
+    container_name: external_api_service
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      # Прокидываем текущую папку с бинарником main
+      - ./:/app
+      # Прокидываем публичный ключ JWT из папки Symfony
+      - ./../symfony_documents_flow/config/jwt/public.pem:/config/jwt/public.pem:ro
+    environment:
+      # Переопределяем путь к ключу внутри контейнера
+      - JWT_PUBLIC_KEY_PATH=/config/jwt/public.pem
+    # Не надо пробрасывать наружу. Порт пробросит сам nginx
+    # ports:
+    #   - "${SERVER_PORT:-8087}:8087"
+    networks:
+      # Своей БД у сервиса нет — хватает общей сети с Symfony и шлюзовым nginx
+      - project-net
+
+networks:
+  project-net:
+    external: true
