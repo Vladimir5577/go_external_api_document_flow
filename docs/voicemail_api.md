@@ -80,7 +80,7 @@ VOICEMAIL_SERVICE_URL=http://voicemail_service:8089
 | `audioError` | string | появляется только при `hasAudio: false` — причина |
 | `status` | string | `new`, `in_progress`, `spam`, `done` |
 | `adminComment` | string \| null | комментарий администратора |
-| `updatedBy` | object \| null | кто последним менял статус или комментарий |
+| `updatedBy` | object \| null | кто последним менял статусssh -p 8076 devops@31.133.49.124 или комментарий |
 | `updatedAt` | string \| null | когда меняли, RFC3339 в UTC |
 
 Ссылку на аудио фронт собирает сам: `{префикс}/messages/{id}/audio`.
