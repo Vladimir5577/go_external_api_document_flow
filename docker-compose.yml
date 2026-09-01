@@ -21,7 +21,14 @@ services:
     networks:
       # Своей БД у сервиса нет — хватает общей сети с Symfony и шлюзовым nginx
       - project-net
+      # Голосовая почта: микросервис намеренно не входит в project-net, своей
+      # авторизации у него нет, и дотягиваться до него должен только этот шлюз
+      - voicemail-net
 
 networks:
   project-net:
+    external: true
+
+  # Поднимается из go_voicemail_service_document_flow/docker-compose.yml
+  voicemail-net:
     external: true

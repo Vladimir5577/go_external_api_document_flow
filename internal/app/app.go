@@ -63,7 +63,7 @@ func buildModules(deps modules.Deps) []modules.Module {
 		contractapplications.New(deps),
 		vacancies.New(deps),
 		vacancyapplications.New(deps),
-		voicemail.New(voicemail.LoadConfig(), deps),
+		voicemail.New(),
 	}
 }
 

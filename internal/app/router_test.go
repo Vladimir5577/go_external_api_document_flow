@@ -26,11 +26,13 @@ import (
 // что именно микросервис ей отправил.
 
 type upstreamCall struct {
-	path   string
-	query  string
-	apiKey string
-	auth   string
-	body   string
+	path     string
+	query    string
+	apiKey   string
+	auth     string
+	body     string
+	userID   string
+	userName string
 }
 
 func newStubUpstream(t *testing.T, calls *[]upstreamCall) *httptest.Server {
@@ -71,44 +73,22 @@ func newStubUpstream(t *testing.T, calls *[]upstreamCall) *httptest.Server {
 	}))
 }
 
-func newStubVMAPI(t *testing.T, calls *[]upstreamCall) *httptest.Server {
+// newStubVoicemail — заглушка микросервиса голосовой почты. Шлюз в его ответ
+// не заглядывает, поэтому заглушке достаточно записать, что до неё доехало.
+func newStubVoicemail(t *testing.T, calls *[]upstreamCall) *httptest.Server {
 	t.Helper()
 
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		*calls = append(*calls, upstreamCall{
-			path:  r.URL.Path,
-			query: r.URL.RawQuery,
-			auth:  r.Header.Get("Authorization"),
-			body:  string(body),
+			path:     r.URL.Path,
+			query:    r.URL.RawQuery,
+			body:     string(body),
+			userID:   r.Header.Get("X-User-Id"),
+			userName: r.Header.Get("X-User-Name"),
 		})
 
-		if r.URL.Path != "/api/v1/health" && r.Header.Get("Authorization") != "Bearer vmapi-token" {
-			writeStub(w, http.StatusUnauthorized, `{"error":"unauthorized"}`)
-			return
-		}
-
-		switch {
-		case r.URL.Path == "/api/v1/health" && r.Method == http.MethodGet:
-			writeStub(w, http.StatusOK, `{"status":"ok","mailboxes":19}`)
-
-		case r.URL.Path == "/api/v1/mailboxes" && r.Method == http.MethodGet:
-			writeStub(w, http.StatusOK, `{"total_new":3,"mailboxes":[{"mailbox":"090","name":"Нерабочее время","new":3,"old":41},{"mailbox":"051","name":"Отдел обращения граждан","new":0,"old":2}]}`)
-
-		case r.URL.Path == "/api/v1/mailboxes/090/messages" && r.Method == http.MethodGet:
-			writeStub(w, http.StatusOK, `{"mailbox":"090","count":1,"truncated":false,"messages":[{"id":"1787591171-00000002","mailbox":"090","folder":"INBOX","caller_number":"+79495352139","caller_name":"","received_epoch":1787591171,"received_at":"2026-08-24T20:06:11+0300","duration_sec":9,"audio":{"format":"mp3","bitrate":"32k","size_bytes":39501,"base64":"SUQz"}}]}`)
-
-		case r.URL.Path == "/api/v1/mailboxes/090/ack" && r.Method == http.MethodPost:
-			writeStub(w, http.StatusOK, `{"mailbox":"090","moved":["1787591171-00000002"],"not_found":[]}`)
-
-		case r.URL.Path == "/api/v1/mailboxes/090/messages/1787591171-00000002/audio" && r.Method == http.MethodGet:
-			w.Header().Set("Content-Type", "audio/mpeg")
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("mp3-bytes"))
-
-		default:
-			writeStub(w, http.StatusNotFound, `{"error":"not found"}`)
-		}
+		writeStub(w, http.StatusOK, `{"items":[],"pagination":{"page":1,"limit":20,"total":0,"pages":0}}`)
 	}))
 }
 
@@ -121,15 +101,13 @@ func writeStub(w http.ResponseWriter, status int, body string) {
 func newTestApp(t *testing.T, upstreamURL string) (*httptest.Server, *rsa.PrivateKey) {
 	t.Helper()
 
-	return newTestAppWithVMAPI(t, upstreamURL, "", "")
+	return newTestAppWithVoicemail(t, upstreamURL, "")
 }
 
-func newTestAppWithVMAPI(t *testing.T, upstreamURL, vmapiURL, vmapiToken string) (*httptest.Server, *rsa.PrivateKey) {
+func newTestAppWithVoicemail(t *testing.T, upstreamURL, voicemailURL string) (*httptest.Server, *rsa.PrivateKey) {
 	t.Helper()
 
-	t.Setenv("VMAPI_URL", vmapiURL)
-	t.Setenv("VMAPI_TOKEN", vmapiToken)
-	t.Setenv("VMAPI_TIMEOUT_SECONDS", "5")
+	t.Setenv("VOICEMAIL_SERVICE_URL", voicemailURL)
 
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -387,115 +365,111 @@ func TestCitizenAppealFlow(t *testing.T) {
 	})
 }
 
-func TestVoicemailFlow(t *testing.T) {
+// Шлюз стал тонким: он проверяет роль, подписывает запрос личностью из JWT и
+// передаёт всё остальное микросервису как есть. Что именно внутри — не его дело.
+func TestVoicemailProxy(t *testing.T) {
 	var donsnabCalls []upstreamCall
 	donsnab := newStubUpstream(t, &donsnabCalls)
 	defer donsnab.Close()
 
-	var vmapiCalls []upstreamCall
-	vmapi := newStubVMAPI(t, &vmapiCalls)
-	defer vmapi.Close()
+	var calls []upstreamCall
+	voicemail := newStubVoicemail(t, &calls)
+	defer voicemail.Close()
 
-	server, key := newTestAppWithVMAPI(t, donsnab.URL, vmapi.URL, "vmapi-token")
+	server, key := newTestAppWithVoicemail(t, donsnab.URL, voicemail.URL)
 	bearer := token(t, key, "ROLE_CITIZEN_APPEAL")
 
 	t.Run("чужая роль не проходит", func(t *testing.T) {
-		resp := request(t, server, http.MethodGet, "/spa/api/external-api/voicemail/mailboxes", token(t, key, "ROLE_USER"), "")
+		calls = nil
+		resp := request(t, server, http.MethodGet, "/spa/api/external-api/voicemail/messages", token(t, key, "ROLE_USER"), "")
 		defer resp.Body.Close()
+
 		if resp.StatusCode != http.StatusForbidden {
 			t.Errorf("статус = %d, ожидался 403", resp.StatusCode)
 		}
+		if len(calls) != 0 {
+			t.Errorf("запрос дошёл до микросервиса, хотя роли нет: %v", calls)
+		}
 	})
 
-	t.Run("ящики нормализуются в camelCase", func(t *testing.T) {
-		vmapiCalls = nil
-		resp := request(t, server, http.MethodGet, "/spa/api/external-api/voicemail/mailboxes", bearer, "")
+	t.Run("путь и query доезжают без изменений", func(t *testing.T) {
+		calls = nil
+		resp := request(t, server, http.MethodGet, "/spa/api/external-api/voicemail/messages?status=spam&page=2", bearer, "")
 		defer resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("статус = %d, ожидался 200", resp.StatusCode)
 		}
-
-		var payload map[string]any
-		json.NewDecoder(resp.Body).Decode(&payload)
-
-		if payload["totalNew"] != float64(3) {
-			t.Errorf("totalNew = %v", payload["totalNew"])
+		if len(calls) != 1 {
+			t.Fatalf("вызовов микросервиса %d, ожидался 1", len(calls))
 		}
-
-		items := payload["items"].([]any)
-		first := items[0].(map[string]any)
-		if first["newCount"] != float64(3) || first["oldCount"] != float64(41) {
-			t.Errorf("счётчики ящика не нормализованы: %v", first)
+		if calls[0].path != "/spa/api/external-api/voicemail/messages" {
+			t.Errorf("путь = %q, префикс резать не надо", calls[0].path)
 		}
-		if vmapiCalls[0].auth != "Bearer vmapi-token" {
-			t.Errorf("Authorization в vmapi = %q", vmapiCalls[0].auth)
+		if calls[0].query != "status=spam&page=2" {
+			t.Errorf("query = %q", calls[0].query)
 		}
 	})
 
-	t.Run("сообщения прокидывают query и добавляют audioUrl", func(t *testing.T) {
-		vmapiCalls = nil
-		resp := request(t, server, http.MethodGet, "/spa/api/external-api/voicemail/mailboxes/090/messages?audio=0&limit=10", bearer, "")
+	t.Run("личность из JWT уезжает заголовками", func(t *testing.T) {
+		calls = nil
+		resp := request(t, server, http.MethodPatch, "/spa/api/external-api/voicemail/messages/3", bearer, `{"status":"done"}`)
 		defer resp.Body.Close()
 
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("статус = %d, ожидался 200", resp.StatusCode)
+		if len(calls) != 1 {
+			t.Fatalf("вызовов микросервиса %d, ожидался 1", len(calls))
 		}
-
-		var payload map[string]any
-		json.NewDecoder(resp.Body).Decode(&payload)
-
-		items := payload["items"].([]any)
-		msg := items[0].(map[string]any)
-		if msg["callerNumber"] != "+79495352139" {
-			t.Errorf("callerNumber = %v", msg["callerNumber"])
+		if calls[0].userID != "1" {
+			t.Errorf("X-User-Id = %q, ожидался клейм id из токена", calls[0].userID)
 		}
-		if msg["receivedAt"] != "2026-08-24T20:06:11+03:00" {
-			t.Errorf("receivedAt = %v", msg["receivedAt"])
+		if calls[0].userName != "tester" {
+			t.Errorf("X-User-Name = %q, ожидался клейм username", calls[0].userName)
 		}
-		if msg["audioUrl"] != "/spa/api/external-api/voicemail/mailboxes/090/messages/1787591171-00000002/audio" {
-			t.Errorf("audioUrl = %v", msg["audioUrl"])
-		}
-		if !strings.Contains(vmapiCalls[0].query, "audio=0") || !strings.Contains(vmapiCalls[0].query, "limit=10") {
-			t.Errorf("query в vmapi = %q", vmapiCalls[0].query)
+		if calls[0].body != `{"status":"done"}` {
+			t.Errorf("тело = %q, должно доезжать нетронутым", calls[0].body)
 		}
 	})
 
-	t.Run("ack отправляет ids и нормализует notFound", func(t *testing.T) {
-		vmapiCalls = nil
-		resp := request(t, server, http.MethodPost, "/spa/api/external-api/voicemail/mailboxes/090/ack", bearer, `{"ids":["1787591171-00000002"]}`)
+	// Микросервис своей авторизации не имеет и верит этим заголовкам. Если бы
+	// клиент мог их подставить, любой пользователь подписывал бы комментарии
+	// чужим идентификатором.
+	t.Run("заголовки клиента затираются", func(t *testing.T) {
+		calls = nil
+
+		req, err := http.NewRequest(http.MethodGet, server.URL+"/spa/api/external-api/voicemail/messages", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+bearer)
+		req.Header.Set("X-User-Id", "999")
+		req.Header.Set("X-User-Name", "director")
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
 		defer resp.Body.Close()
 
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("статус = %d, ожидался 200", resp.StatusCode)
+		if len(calls) != 1 {
+			t.Fatalf("вызовов микросервиса %d, ожидался 1", len(calls))
 		}
-		if vmapiCalls[0].body != `{"ids":["1787591171-00000002"]}` {
-			t.Errorf("тело ack в vmapi = %q", vmapiCalls[0].body)
-		}
-
-		var payload map[string]any
-		json.NewDecoder(resp.Body).Decode(&payload)
-		if _, ok := payload["not_found"]; ok {
-			t.Errorf("ответ не должен содержать snake_case not_found: %v", payload)
-		}
-		if _, ok := payload["notFound"]; !ok {
-			t.Errorf("ответ должен содержать notFound: %v", payload)
+		if calls[0].userID == "999" || calls[0].userName == "director" {
+			t.Errorf("подставленные клиентом заголовки доехали: id=%q name=%q",
+				calls[0].userID, calls[0].userName)
 		}
 	})
 
-	t.Run("audio проксируется потоком", func(t *testing.T) {
-		resp := request(t, server, http.MethodGet, "/spa/api/external-api/voicemail/mailboxes/090/messages/1787591171-00000002/audio", bearer, "")
+	t.Run("микросервис недоступен — 502", func(t *testing.T) {
+		down := newStubVoicemail(t, &calls)
+		down.Close()
+
+		server, key := newTestAppWithVoicemail(t, donsnab.URL, down.URL)
+		resp := request(t, server, http.MethodGet, "/spa/api/external-api/voicemail/messages",
+			token(t, key, "ROLE_CITIZEN_APPEAL"), "")
 		defer resp.Body.Close()
 
-		body, _ := io.ReadAll(resp.Body)
-		if string(body) != "mp3-bytes" {
-			t.Errorf("тело audio = %q", body)
-		}
-		if resp.Header.Get("Content-Type") != "audio/mpeg" {
-			t.Errorf("Content-Type = %q", resp.Header.Get("Content-Type"))
-		}
-		if cache := resp.Header.Get("Cache-Control"); cache != "no-store" {
-			t.Errorf("Cache-Control = %q, ожидался no-store", cache)
+		if resp.StatusCode != http.StatusBadGateway {
+			t.Errorf("статус = %d, ожидался 502", resp.StatusCode)
 		}
 	})
 }
