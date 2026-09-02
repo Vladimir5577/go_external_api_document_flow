@@ -6,6 +6,7 @@ var contractApplicationStatusLabels = map[string]string{
 	"contract_sent": "Договор отправлен",
 	"signed":        "Подписан",
 	"rejected":      "Отклонена",
+	"other":         "Другие вопросы",
 }
 
 var contractConsumerTypeLabels = map[string]string{
