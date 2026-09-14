@@ -9,10 +9,17 @@ import (
 // пользователя — поэтому раскрывать надо и здесь, иначе ROLE_ADMIN потеряет доступ.
 //
 // Здесь только те роли, которые дают доступ к маршрутам этого сервиса.
+//
+// ВАЖНО: карта развёрнута заранее, потому что HasRole раскрывает ровно один
+// уровень. В Symfony иерархия транзитивна — там ROLE_ADMIN дотягивается до
+// ROLE_CITIZEN_APPEAL_VOICEMAIL через ROLE_CITIZEN_APPEAL. Здесь так не выйдет,
+// поэтому наследники родителей выписаны в списки родителей явно.
+//
 // ponytail: при добавлении новой роли-родителя в security.yaml карту надо руками синхронизировать.
 var roleHierarchy = map[string][]string{
-	"ROLE_ADMIN":    {"ROLE_ANALYTIC", "ROLE_CITIZEN_APPEAL", "ROLE_HR", "ROLE_CONTRACT_APPLICATION", "ROLE_USER"},
-	"ROLE_ANALYTIC": {"ROLE_CITIZEN_APPEAL", "ROLE_HR", "ROLE_CONTRACT_APPLICATION", "ROLE_USER"},
+	"ROLE_ADMIN":          {"ROLE_ANALYTIC", "ROLE_CITIZEN_APPEAL", "ROLE_CITIZEN_APPEAL_VOICEMAIL", "ROLE_HR", "ROLE_CONTRACT_APPLICATION", "ROLE_USER"},
+	"ROLE_ANALYTIC":       {"ROLE_CITIZEN_APPEAL", "ROLE_CITIZEN_APPEAL_VOICEMAIL", "ROLE_HR", "ROLE_CONTRACT_APPLICATION", "ROLE_USER"},
+	"ROLE_CITIZEN_APPEAL": {"ROLE_CITIZEN_APPEAL_VOICEMAIL", "ROLE_USER"},
 }
 
 // HasRole проверяет наличие любой из требуемых ролей с учётом иерархии.

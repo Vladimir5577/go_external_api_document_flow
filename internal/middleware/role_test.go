@@ -17,6 +17,16 @@ func TestHasRoleFollowsSymfonyHierarchy(t *testing.T) {
 		{"обычный пользователь", []string{"ROLE_USER"}, []string{"ROLE_HR"}, false},
 		{"чужая профильная роль", []string{"ROLE_CITIZEN_APPEAL"}, []string{"ROLE_HR"}, false},
 		{"ролей нет вовсе", nil, []string{"ROLE_HR"}, false},
+
+		// Голосовая почта вынесена в отдельную роль. Раскрытие тут в один уровень,
+		// поэтому цепочку админ → обращения → голосовая почта карта должна
+		// покрывать напрямую, иначе админ молча потеряет доступ.
+		{"голосовая почта своей ролью", []string{"ROLE_CITIZEN_APPEAL_VOICEMAIL"}, []string{"ROLE_CITIZEN_APPEAL_VOICEMAIL"}, true},
+		{"обращения наследуют голосовую почту", []string{"ROLE_CITIZEN_APPEAL"}, []string{"ROLE_CITIZEN_APPEAL_VOICEMAIL"}, true},
+		{"аналитик наследует голосовую почту", []string{"ROLE_ANALYTIC"}, []string{"ROLE_CITIZEN_APPEAL_VOICEMAIL"}, true},
+		{"админ наследует голосовую почту", []string{"ROLE_ADMIN"}, []string{"ROLE_CITIZEN_APPEAL_VOICEMAIL"}, true},
+		// А обратной дороги нет: голосовая почта не даёт доступа к обращениям.
+		{"голосовая почта не даёт обращений", []string{"ROLE_CITIZEN_APPEAL_VOICEMAIL"}, []string{"ROLE_CITIZEN_APPEAL"}, false},
 	}
 
 	for _, tc := range cases {

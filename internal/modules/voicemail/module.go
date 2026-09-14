@@ -75,7 +75,11 @@ func (m *Module) Name() string {
 
 func (m *Module) Mount(r chi.Router) {
 	r.Route(dto.APIPrefix+"/voicemail", func(r chi.Router) {
-		r.Use(middleware.RequireRole("ROLE_CITIZEN_APPEAL"))
+		// Своя роль, а не общая ROLE_CITIZEN_APPEAL: доступ к записям разговоров
+		// с гражданами можно выдать отдельно от остального модуля обращений.
+		// Её наследует ROLE_CITIZEN_APPEAL, так что кто работал с обращениями
+		// раньше — доступ не теряет.
+		r.Use(middleware.RequireRole("ROLE_CITIZEN_APPEAL_VOICEMAIL"))
 
 		// Один маршрут вместо пяти: что именно умеет микросервис, шлюз не знает.
 		r.Handle("/*", m.proxy)
