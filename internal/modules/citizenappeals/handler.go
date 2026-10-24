@@ -1,6 +1,7 @@
 package citizenappeals
 
 import (
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -83,7 +84,10 @@ func (h *CitizenAppealHandler) Update() http.HandlerFunc {
 		// Перечитываем обращение целиком: upstream на PATCH отдаёт не всё.
 		appeal, err := h.getOne(r, id)
 		if err != nil {
-			httpx.WriteError(w, http.StatusUnprocessableEntity, httpx.NotFoundOr(err, "Обращение не найдено", "Сервис обращений недоступен"))
+			slog.Error("Не удалось перечитать обращение после сохранения", "id", id, "error", err)
+			// Частичный объект затёр бы карточку на фронте (файлы, подписи статуса),
+			// поэтому честно сообщаем, что сохранение прошло, а карточку надо перечитать.
+			httpx.WriteError(w, http.StatusBadGateway, "Изменения сохранены, но обновить карточку не удалось. Обновите страницу.")
 			return
 		}
 
@@ -102,7 +106,7 @@ func (h *CitizenAppealHandler) File() http.HandlerFunc {
 		httpx.NoStore(w)
 		path := citizenAppealsPath + "/files/" + strconv.FormatInt(id, 10)
 		if err := h.api.Stream(r.Context(), w, path, httpx.DownloadParam(r)); err != nil {
-			httpx.WriteError(w, http.StatusNotFound, httpx.NotFoundOr(err, "Файл не найден", "Ошибка получения файла"))
+			httpx.WriteError(w, httpx.FileErrorStatus(err), httpx.NotFoundOr(err, "Файл не найден", "Ошибка получения файла"))
 			return
 		}
 	}
@@ -124,6 +128,12 @@ func (h *CitizenAppealHandler) PDF() http.HandlerFunc {
 		}
 
 		appeal := dto.Data(raw)
+		if err := h.renderer.Acquire(r.Context()); err != nil {
+			httpx.WriteError(w, http.StatusInternalServerError, "Не удалось сформировать PDF")
+			return
+		}
+		defer h.renderer.Release()
+
 		files := httpx.FetchAttachments(r.Context(), h.api, appeal["files"], func(fileID int64) string {
 			return citizenAppealsPath + "/files/" + strconv.FormatInt(fileID, 10)
 		})

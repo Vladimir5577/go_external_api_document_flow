@@ -310,8 +310,8 @@ func TestCitizenAppealFlow(t *testing.T) {
 		if len(calls) != 2 {
 			t.Fatalf("ожидались PATCH и повторный GET, получено %d вызовов", len(calls))
 		}
-		if calls[0].body != `{"status":"done"}` {
-			t.Errorf("наверх ушло тело %q — adminComment: null не должен передаваться", calls[0].body)
+		if calls[0].body != `{"adminComment":"","status":"done"}` {
+			t.Errorf("наверх ушло тело %q — adminComment: null должен очищать комментарий", calls[0].body)
 		}
 	})
 

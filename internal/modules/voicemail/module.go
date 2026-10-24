@@ -40,6 +40,13 @@ func New() *Module {
 		return &Module{proxy: unavailable()}
 	}
 
+	// Общий секрет с микросервисом: без него сосед по сети voicemail-net мог бы
+	// подставить любой X-User-Id. Пара к GATEWAY_SECRET в .env микросервиса.
+	gatewaySecret := config.GetEnv("VOICEMAIL_GATEWAY_SECRET", "")
+	if gatewaySecret == "" {
+		slog.Warn("VOICEMAIL_GATEWAY_SECRET не задан — микросервис голосовой почты с проверкой секрета ответит 403")
+	}
+
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			// Путь не режем: микросервис слушает ровно на этом префиксе.
@@ -53,6 +60,14 @@ func New() *Module {
 			// только потом ставим разобранное из подписанного JWT.
 			pr.Out.Header.Del("X-User-Id")
 			pr.Out.Header.Del("X-User-Name")
+			// JWT и куки микросервису не нужны — дальше шлюза не пускаем.
+			pr.Out.Header.Del("Authorization")
+			pr.Out.Header.Del("Cookie")
+			// Set затирает то, что мог прислать клиент.
+			pr.Out.Header.Del("X-Gateway-Secret")
+			if gatewaySecret != "" {
+				pr.Out.Header.Set("X-Gateway-Secret", gatewaySecret)
+			}
 
 			if user, ok := middleware.GetUser(pr.In.Context()); ok {
 				pr.Out.Header.Set("X-User-Id", strconv.FormatInt(user.ID, 10))

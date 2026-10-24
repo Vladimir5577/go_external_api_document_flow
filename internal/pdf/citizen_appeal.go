@@ -10,10 +10,9 @@ import (
 // На вход идёт сырой объект из don_snab, а не презентация для SPA:
 // выгрузке нужны поля, которых в JSON для фронта нет (город лейблом, адрес).
 func (r *Renderer) CitizenAppeal(ctx context.Context, appeal map[string]any, files []Attachment) ([]byte, error) {
-	if err := r.acquire(ctx); err != nil {
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	defer r.release()
 
 	heading := "Обращение " + text(appeal["publicId"])
 

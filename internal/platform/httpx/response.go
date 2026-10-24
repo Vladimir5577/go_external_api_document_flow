@@ -46,6 +46,13 @@ func NotFoundOr(err error, notFound, prefix string) string {
 	return Unavailable(err, prefix)
 }
 
+func FileErrorStatus(err error) int {
+	if apiErr := asAPIError(err); apiErr != nil && apiErr.Status == http.StatusNotFound {
+		return http.StatusNotFound
+	}
+	return http.StatusBadGateway
+}
+
 func SaveError(err error, notFound, failedPrefix string, withViolations bool) string {
 	apiErr := asAPIError(err)
 	if apiErr == nil || apiErr.Status == 0 {

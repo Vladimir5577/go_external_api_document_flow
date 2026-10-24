@@ -1,6 +1,7 @@
 package vacancyapplications
 
 import (
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -80,7 +81,10 @@ func (h *VacancyApplicationHandler) Update() http.HandlerFunc {
 
 		application, err := h.getOne(r, id)
 		if err != nil {
-			httpx.WriteError(w, http.StatusUnprocessableEntity, httpx.NotFoundOr(err, "Отклик не найден", "Сервис откликов недоступен"))
+			slog.Error("Не удалось перечитать отклик после сохранения", "id", id, "error", err)
+			// Частичный объект затёр бы карточку на фронте (файлы, подписи статуса),
+			// поэтому честно сообщаем, что сохранение прошло, а карточку надо перечитать.
+			httpx.WriteError(w, http.StatusBadGateway, "Изменения сохранены, но обновить карточку не удалось. Обновите страницу.")
 			return
 		}
 
@@ -99,7 +103,7 @@ func (h *VacancyApplicationHandler) Resume() http.HandlerFunc {
 		httpx.NoStore(w)
 		path := vacancyApplicationsPath + "/" + strconv.FormatInt(id, 10) + "/resume"
 		if err := h.api.Stream(r.Context(), w, path, httpx.DownloadParam(r)); err != nil {
-			httpx.WriteError(w, http.StatusNotFound, httpx.NotFoundOr(err, "Резюме не найдено", "Ошибка получения резюме"))
+			httpx.WriteError(w, httpx.FileErrorStatus(err), httpx.NotFoundOr(err, "Резюме не найдено", "Ошибка получения резюме"))
 			return
 		}
 	}

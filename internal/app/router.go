@@ -19,13 +19,11 @@ func setupRouter(apiModules []modules.Module, authMw *middleware.AuthMiddleware)
 	// 60 секунд, а не 15 как в канбане: сюда попадает стриминг вложений и резюме.
 	r.Use(chiMiddleware.Timeout(60 * time.Second))
 
-	// public API group
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"status": "ok", "service": "external-api"}`))
 	})
 
-	// protected API group
 	r.Group(func(r chi.Router) {
 		r.Use(authMw.Handler)
 

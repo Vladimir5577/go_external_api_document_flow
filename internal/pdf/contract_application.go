@@ -51,10 +51,9 @@ var (
 
 // ContractApplication — порт ContractApplicationPdfService::generate().
 func (r *Renderer) ContractApplication(ctx context.Context, application map[string]any, files []Attachment) ([]byte, error) {
-	if err := r.acquire(ctx); err != nil {
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	defer r.release()
 
 	heading := "Заявка " + text(application["publicId"])
 

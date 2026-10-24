@@ -5,7 +5,7 @@ import (
 	"os"
 )
 
-// Setup инициализирует и устанавливает глобальный логгер slog
+// Setup задаёт глобальный логгер: для local/dev — текст и Debug, иначе — JSON и Info.
 func Setup(env string) {
 	var handler slog.Handler
 

@@ -66,11 +66,12 @@ type Attachment struct {
 // В монолите этот потолок бесплатно задавало число воркеров PHP-FPM.
 const maxConcurrentDocuments = 4
 
+var documentSlots = make(chan struct{}, maxConcurrentDocuments)
+
 type Renderer struct {
 	regular   []byte
 	bold      []byte
 	presenter *dto.Presenter
-	slots     chan struct{}
 }
 
 // NewRenderer читает шрифты один раз на старте: без кириллического TTF
@@ -90,23 +91,22 @@ func NewRenderer(regularPath, boldPath string, presenter *dto.Presenter) (*Rende
 		regular:   regular,
 		bold:      bold,
 		presenter: presenter,
-		slots:     make(chan struct{}, maxConcurrentDocuments),
 	}, nil
 }
 
-// acquire занимает слот генерации. Ждём в очереди, но не дольше, чем живёт
-// запрос: отменённому клиенту документ уже не нужен.
-func (r *Renderer) acquire(ctx context.Context) error {
+// Acquire занимает общий слот до скачивания вложений и до отправки PDF.
+// Ожидание прекращается при отмене запроса.
+func (r *Renderer) Acquire(ctx context.Context) error {
 	select {
-	case r.slots <- struct{}{}:
+	case documentSlots <- struct{}{}:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
 	}
 }
 
-func (r *Renderer) release() {
-	<-r.slots
+func (r *Renderer) Release() {
+	<-documentSlots
 }
 
 type doc struct {
@@ -310,6 +310,14 @@ func (d *doc) appendImage(file Attachment) {
 		return
 	}
 
+	d.imageSeq++
+	name := "attachment-" + strconv.Itoa(d.imageSeq)
+	options := fpdf.ImageOptions{ImageType: format}
+	if !d.registerImage(name, options, file.Content) {
+		d.placeholder(file, "Не удалось обработать изображение.")
+		return
+	}
+
 	d.pdf.AddPage()
 	d.fileCaption(file)
 
@@ -326,12 +334,24 @@ func (d *doc) appendImage(file Attachment) {
 	width := float64(config.Width) * scale
 	height := float64(config.Height) * scale
 
-	d.imageSeq++
-	name := "attachment-" + strconv.Itoa(d.imageSeq)
-	options := fpdf.ImageOptions{ImageType: format}
-
-	d.pdf.RegisterImageOptionsReader(name, options, bytes.NewReader(file.Content))
 	d.pdf.ImageOptions(name, marginX+(availableWidth-width)/2, top, width, height, false, options, 0, "")
+}
+
+func (d *doc) registerImage(name string, options fpdf.ImageOptions, content []byte) (ok bool) {
+	if d.pdf.Error() != nil {
+		return false
+	}
+	// fpdf может паниковать или сохранить ошибку; проверяем до изменения страниц.
+	defer func() {
+		if recover() != nil {
+			ok = false
+		}
+		if !ok {
+			d.pdf.ClearError()
+		}
+	}()
+	info := d.pdf.RegisterImageOptionsReader(name, options, bytes.NewReader(content))
+	return info != nil && d.pdf.Error() == nil
 }
 
 func (d *doc) placeholder(file Attachment, reason string) {

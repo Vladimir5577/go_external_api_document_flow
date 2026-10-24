@@ -25,6 +25,8 @@ const (
 
 var ErrAttachmentsTooLarge = errors.New("суммарный размер вложений превышает лимит")
 
+var attachmentSlots = make(chan struct{}, AttachmentConcurrency)
+
 func FetchAttachments(ctx context.Context, api *client.DonSnab, raw any, pathFor func(fileID int64) string) []pdf.Attachment {
 	list, _ := raw.([]any)
 
@@ -49,7 +51,6 @@ func FetchAttachments(ctx context.Context, api *client.DonSnab, raw any, pathFor
 		})
 	}
 
-	semaphore := make(chan struct{}, AttachmentConcurrency)
 	var wg sync.WaitGroup
 	var totalBytes atomic.Int64
 
@@ -58,8 +59,13 @@ func FetchAttachments(ctx context.Context, api *client.DonSnab, raw any, pathFor
 		go func(j job) {
 			defer wg.Done()
 
-			semaphore <- struct{}{}
-			defer func() { <-semaphore }()
+			select {
+			case attachmentSlots <- struct{}{}:
+				defer func() { <-attachmentSlots }()
+			case <-ctx.Done():
+				attachments[j.index].Err = ctx.Err()
+				return
+			}
 
 			content, err := api.Fetch(ctx, pathFor(j.id), nil)
 			if err == nil && totalBytes.Add(int64(len(content))) > MaxAttachmentsTotalBytes {

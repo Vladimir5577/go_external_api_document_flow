@@ -40,7 +40,6 @@ type PDFConfig struct {
 }
 
 func Load() *Config {
-	// Пытаемся загрузить локальный .env файл, если он есть
 	if err := godotenv.Load(); err != nil {
 		slog.Warn("Предупреждение: .env файл не найден, используются системные переменные окружения")
 	}

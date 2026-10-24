@@ -76,7 +76,6 @@ func (a *App) Run() error {
 		IdleTimeout:  120 * time.Second,
 	}
 
-	// Запускаем сервер в горутине
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("Ошибка старта HTTP-сервера", "error", err)
