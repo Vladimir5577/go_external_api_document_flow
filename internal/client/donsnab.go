@@ -146,7 +146,14 @@ func (c *DonSnab) Fetch(ctx context.Context, path string, query url.Values) ([]b
 		return nil, c.apiError(resp)
 	}
 
-	return io.ReadAll(io.LimitReader(resp.Body, maxAttachmentBytes))
+	content, err := io.ReadAll(io.LimitReader(resp.Body, maxAttachmentBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(content) > maxAttachmentBytes {
+		return nil, fmt.Errorf("размер вложения превышает лимит %d байт", maxAttachmentBytes)
+	}
+	return content, nil
 }
 
 // Stream проксирует бинарный ответ upstream (вложения, резюме) прямо в клиента.
@@ -179,6 +186,7 @@ func (c *DonSnab) Stream(ctx context.Context, w http.ResponseWriter, path string
 	w.WriteHeader(http.StatusOK)
 	if _, err := io.Copy(w, resp.Body); err != nil {
 		slog.Error("Обрыв проксирования файла", "path", path, "error", err)
+		panic(http.ErrAbortHandler)
 	}
 
 	return nil
